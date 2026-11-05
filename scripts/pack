@@ -1,0 +1,24 @@
+#!/usr/bin/env python3
+"""Build the release tar and .sha256 for a tag `<id>-v<N>`."""
+
+import argparse
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tools"))
+
+from avatars import pack  # noqa: E402
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("tag")
+parser.add_argument("out_dir", type=Path)
+parser.add_argument("--root", type=Path, default=ROOT, help="repository root")
+args = parser.parse_args()
+
+try:
+    id, version = pack.parse_tag(args.tag)
+    print(pack.build(args.root, id, version, args.out_dir))
+except ValueError as e:
+    print(e, file=sys.stderr)
+    sys.exit(1)

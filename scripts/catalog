@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Write catalog.json from catalog.toml, the releases listing and the downloaded .sha256 files."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tools"))
+
+from avatars import catalog  # noqa: E402
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--releases", type=Path, required=True, help="JSON from the GitHub releases API")
+parser.add_argument("--sums", type=Path, required=True, help="directory of <id>-v<N>.tar.sha256 files")
+parser.add_argument("--repo-url", required=True)
+parser.add_argument("--out", type=Path, required=True)
+parser.add_argument("--root", type=Path, default=ROOT, help="repository root")
+args = parser.parse_args()
+
+releases = json.loads(args.releases.read_text())
+# `gh api --paginate` concatenates pages; accept a flat list or a list of pages.
+if releases and isinstance(releases[0], list):
+    releases = [r for page in releases for r in page]
+try:
+    out = catalog.build(args.root, releases, args.sums, args.repo_url)
+except ValueError as e:
+    print(e, file=sys.stderr)
+    sys.exit(1)
+args.out.parent.mkdir(parents=True, exist_ok=True)
+args.out.write_text(json.dumps(out, ensure_ascii=False, indent=2) + "\n")
