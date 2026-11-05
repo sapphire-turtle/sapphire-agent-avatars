@@ -1,0 +1,7 @@
+# The avatars this repository publishes, in the order the in-app catalog lists them.
+#
+# [[avatar]]
+# id = "default-chibi"          # <outfit>-<proportion>; proportion is "regular" or "chibi"
+# outfit = "default"
+# proportion = "chibi"
+# title = { en = "…", ja = "…" }
