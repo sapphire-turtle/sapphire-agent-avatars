@@ -12,7 +12,7 @@ The agent downloads one avatar into a new workspace; more can be added later fro
 | `placeholder-chibi` | placeholder (a stand-in for testing; not the real character) | chibi |
 
 Each avatar is released as `<id>-v<N>.tar` (2D sprites and a VRM model with its VRMA
-gestures, plus `profile.md`) together with `<id>-v<N>.tar.sha256`. To verify a download:
+gestures) together with `<id>-v<N>.tar.sha256`. To verify a download:
 
 ```sh
 sha256sum -c default-chibi-v1.tar.sha256

@@ -42,7 +42,7 @@ def build(root: Path, id: str, version: int, out_dir: Path) -> Path:
         raise ValueError("\n".join(problems))
 
     src = root / "avatars" / id
-    entries = {"avatar": None, "avatar/profile.md": repo.profile_path(root)}
+    entries = {"avatar": None}
     for path in src.rglob("*"):
         entries["avatar/" + path.relative_to(src).as_posix()] = None if path.is_dir() else path
 

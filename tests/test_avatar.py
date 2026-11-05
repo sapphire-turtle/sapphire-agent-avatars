@@ -13,14 +13,12 @@ class AvatarTest(unittest.TestCase):
         self.root = Path(self._tmp.name)
         self.dir = self.root / "a"
         fixtures.avatar(self.dir)
-        self.profile = self.root / "profile.md"
-        self.profile.write_text("# Profile\n")
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def problems(self):
-        return avatar.check(self.dir, self.profile)
+        return avatar.check(self.dir)
 
     def assertOneProblem(self, needle):
         problems = self.problems()
@@ -76,10 +74,6 @@ class AvatarTest(unittest.TestCase):
     def test_file_over_cap_fails(self):
         with mock.patch.object(avatar, "MAX_FILE", 50):
             self.assertTrue(any("vrm/model.vrm" in p for p in self.problems()))
-
-    def test_profile_not_utf8_fails(self):
-        self.profile.write_bytes(b"\xff\xfe")
-        self.assertOneProblem("UTF-8")
 
     def test_unparseable_toml_fails(self):
         (self.dir / "avatar.toml").write_text("[sprite\n")

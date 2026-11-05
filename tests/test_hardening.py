@@ -112,15 +112,13 @@ class AvatarRobustnessTest(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self._tmp.name) / "a"
         fixtures.avatar(self.dir)
-        self.profile = Path(self._tmp.name) / "profile.md"
-        self.profile.write_text("x")
 
     def tearDown(self):
         self._tmp.cleanup()
 
     def problems_for(self, toml):
         (self.dir / "avatar.toml").write_text(toml)
-        return avatar.check(self.dir, self.profile)
+        return avatar.check(self.dir)
 
     def test_wrong_shapes_are_reported(self):
         for toml in ('vrm = "x"\n', "[vrm]\nmodel = 1\n", '[vrm]\nmodel = "vrm/model.vrm"\nactions = "x"\n',
@@ -139,7 +137,7 @@ class AvatarRobustnessTest(unittest.TestCase):
     def test_sprite_without_image_chunk_is_reported(self):
         bad = b"RIFF" + struct.pack("<I", 4 + 8 + 4) + b"WEBP" + riff_chunk(b"ANIM", b"\x00" * 4)
         (self.dir / "sprite" / "idle.webp").write_bytes(bad)
-        problems = avatar.check(self.dir, self.profile)
+        problems = avatar.check(self.dir)
         self.assertTrue(any("idle.webp" in p for p in problems), problems)
 
 

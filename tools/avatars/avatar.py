@@ -104,8 +104,8 @@ def _format_problems(rel: str, data: bytes) -> list[str]:
     return [f"{rel}: {p}" for p in found]
 
 
-def check(dir: Path, profile: Path) -> list[str]:
-    """Problems with the avatar in `dir`, shipped together with `profile`; empty when clean."""
+def check(dir: Path) -> list[str]:
+    """Problems with the avatar in `dir`; empty when clean."""
     try:
         config = tomllib.loads((dir / CONFIG).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
@@ -152,14 +152,6 @@ def check(dir: Path, profile: Path) -> list[str]:
         if rel != CONFIG and rel not in referenced:
             problems.append(f"{rel} is not named in {CONFIG}")
 
-    try:
-        profile_bytes = profile.read_bytes()
-        profile_bytes.decode("utf-8")
-        total += len(profile_bytes)
-    except OSError as e:
-        problems.append(f"profile: {e}")
-    except UnicodeDecodeError:
-        problems.append(f"{profile.name} is not UTF-8")
     if total > MAX_AVATAR_TOTAL:
         problems.append(f"total size {total} bytes is over {MAX_AVATAR_TOTAL}")
     return problems
