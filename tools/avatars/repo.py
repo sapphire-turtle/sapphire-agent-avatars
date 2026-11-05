@@ -14,15 +14,25 @@ def profile_path(root: Path) -> Path:
 
 
 def load_catalog(root: Path) -> list[dict]:
-    """The [[avatar]] entries of catalog.toml, in order."""
-    return tomllib.loads((root / "catalog.toml").read_text(encoding="utf-8")).get("avatar", [])
+    """The [[avatar]] entries of catalog.toml, in order; ValueError if its shape is wrong."""
+    entries = tomllib.loads((root / "catalog.toml").read_text(encoding="utf-8")).get("avatar", [])
+    if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+        raise ValueError("catalog.toml: avatar must be an array of tables ([[avatar]])")
+    for i, entry in enumerate(entries):
+        for key in ("id", "outfit", "proportion"):
+            if not isinstance(entry.get(key), str):
+                raise ValueError(f"catalog.toml avatar[{i}]: {key} must be a string")
+        title = entry.get("title")
+        if not isinstance(title, dict) or not all(isinstance(title.get(k), str) and title[k] for k in ("en", "ja")):
+            raise ValueError(f"catalog.toml avatar[{i}]: title must be a table with non-empty en and ja")
+    return entries
 
 
 def check(root: Path, only: str | None = None) -> list[str]:
     """Problems across the repository; avatar contents only for `only` when given."""
     try:
         entries = load_catalog(root)
-    except (OSError, tomllib.TOMLDecodeError) as e:
+    except (OSError, ValueError) as e:
         return [f"catalog.toml: {e}"]
 
     problems = []
@@ -35,9 +45,6 @@ def check(root: Path, only: str | None = None) -> list[str]:
             outfit, proportion = id.rsplit("-", 1)
             if entry.get("outfit") != outfit or entry.get("proportion") != proportion:
                 problems.append(f"{id}: outfit/proportion must be {outfit!r}/{proportion!r}")
-        title = entry.get("title", {})
-        if not title.get("en") or not title.get("ja"):
-            problems.append(f"{id}: title.en and title.ja are required")
         if id in ids:
             problems.append(f"{id}: duplicate id in catalog.toml")
         ids.append(id)
@@ -47,6 +54,12 @@ def check(root: Path, only: str | None = None) -> list[str]:
         problems.append(f"{id}: avatars/{id} has no catalog.toml entry")
     for id in sorted(set(ids) - dirs):
         problems.append(f"{id}: catalog.toml entry has no avatars/{id}")
+
+    expected = {f"{id}.webp" for id in ids} | {".gitkeep"}
+    thumbs = root / "thumbnails"
+    for path in sorted(thumbs.iterdir()) if thumbs.is_dir() else []:
+        if path.name not in expected:
+            problems.append(f"thumbnails/{path.name} belongs to no catalog.toml entry")
 
     for id in ids:
         thumb = root / "thumbnails" / f"{id}.webp"

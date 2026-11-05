@@ -21,6 +21,13 @@ sha256sum -c default-chibi-v1.tar.sha256
 The list of every released avatar, with versions, URLs and checksums, is
 [`catalog.json`](../../releases/download/catalog/catalog.json).
 
+## Releasing
+
+Push a tag `<id>-v<N>` on a commit already on `main`. CI checks the avatar, builds the tar,
+publishes the release and rebuilds the catalog. Push at most three tags at once (GitHub
+starts no workflow for larger pushes); if the catalog step fails, run the Release workflow
+by hand to rebuild it.
+
 ## Checks
 
 `scripts/check` verifies every avatar before it is released: the files named in

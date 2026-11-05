@@ -1,6 +1,7 @@
 """Build catalog.json from catalog.toml and the published releases."""
 
 import re
+import shutil
 from pathlib import Path
 
 from . import pack, repo
@@ -13,6 +14,9 @@ def build(root: Path, releases: list[dict], sums_dir: Path, repo_url: str) -> di
     """`releases` is the GitHub releases API listing; `sums_dir` holds the downloaded `.tar.sha256` files."""
     latest: dict[str, tuple[int, dict]] = {}
     for rel in releases:
+        # Drafts and prereleases are not public, so their URLs would not download.
+        if rel.get("draft") or rel.get("prerelease"):
+            continue
         try:
             id, version = pack.parse_tag(rel.get("tag_name", ""))
         except ValueError:
@@ -49,3 +53,11 @@ def build(root: Path, releases: list[dict], sums_dir: Path, repo_url: str) -> di
             }
         )
     return {"schema": SCHEMA, "avatars": avatars}
+
+
+def copy_thumbnails(root: Path, built: dict, out_dir: Path) -> None:
+    """Copy the thumbnail of every avatar in `built` (and only those) into `out_dir`."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for entry in built["avatars"]:
+        name = f"{entry['id']}.webp"
+        shutil.copyfile(root / "thumbnails" / name, out_dir / name)

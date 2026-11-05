@@ -30,47 +30,62 @@ def path_problem(path: str) -> str | None:
     return None
 
 
-def _structure(config: dict) -> tuple[list[str], list[str], list[str]]:
-    """(problems, sprite paths, vrm paths) from the parsed config."""
-    problems, sprites, models = [], [], []
-    vrm = config.get("vrm")
-    if vrm is not None:
-        if not vrm.get("model"):
-            problems.append("vrm.model is empty")
+# The extensions each role accepts.
+SPRITE_EXTS = (".png", ".webp")
+MODEL_EXTS = (".vrm",)
+ANIMATION_EXTS = (".vrma",)
+
+
+def _structure(config: dict) -> tuple[list[str], dict[str, list[tuple[str, ...]]]]:
+    """(problems, {path: the extensions each of its roles allows}) from the parsed config."""
+    problems: list[str] = []
+    files: dict[str, list[tuple[str, ...]]] = {}
+
+    def add(key: str, value, exts: tuple[str, ...]) -> None:
+        if not isinstance(value, str) or not value:
+            problems.append(f"{key} must be a non-empty string")
         else:
-            models.append(vrm["model"])
+            files.setdefault(value, []).append(exts)
+
+    def table(key: str, value) -> bool:
+        if not isinstance(value, dict):
+            problems.append(f"{key} must be a table")
+            return False
+        return True
+
+    vrm = config.get("vrm")
+    if vrm is not None and table("vrm", vrm):
+        add("vrm.model", vrm.get("model"), MODEL_EXTS)
         if "idle" in vrm:
-            if not vrm["idle"]:
-                problems.append("vrm.idle is empty")
-            else:
-                models.append(vrm["idle"])
-        for name, path in vrm.get("actions", {}).items():
-            if not name or not path:
-                problems.append(f"vrm.actions.{name} is empty")
-            else:
-                models.append(path)
+            add("vrm.idle", vrm["idle"], ANIMATION_EXTS)
+        actions = vrm.get("actions", {})
+        if table("vrm.actions", actions):
+            for name, path in actions.items():
+                add(f"vrm.actions.{name}", path, ANIMATION_EXTS)
+
     sprite = config.get("sprite")
-    if sprite is not None:
+    if sprite is not None and table("sprite", sprite):
         poses = sprite.get("poses", {})
-        if not poses:
-            problems.append("sprite.poses is empty")
-        elif sprite.get("default_pose") not in poses:
-            problems.append(f"sprite.default_pose {sprite.get('default_pose')!r} is not one of sprite.poses")
-        for name, pose in poses.items():
-            if not pose.get("base"):
-                problems.append(f"sprite.poses.{name}.base is empty")
-            else:
-                sprites.append(pose["base"])
-            for key, path in pose.get("expressions", {}).items():
-                if key not in SPRITE_EXPRESSIONS:
-                    problems.append(
-                        f"sprite.poses.{name}.expressions.{key} is not one of {', '.join(SPRITE_EXPRESSIONS)}"
-                    )
-                elif not path:
-                    problems.append(f"sprite.poses.{name}.expressions.{key} is empty")
-                else:
-                    sprites.append(path)
-    return problems, sprites, models
+        if table("sprite.poses", poses):
+            if not poses:
+                problems.append("sprite.poses is empty")
+            elif sprite.get("default_pose") not in poses:
+                problems.append(f"sprite.default_pose {sprite.get('default_pose')!r} is not one of sprite.poses")
+            for name, pose in poses.items():
+                if not table(f"sprite.poses.{name}", pose):
+                    continue
+                add(f"sprite.poses.{name}.base", pose.get("base"), SPRITE_EXTS)
+                expressions = pose.get("expressions", {})
+                if not table(f"sprite.poses.{name}.expressions", expressions):
+                    continue
+                for key, path in expressions.items():
+                    if key not in SPRITE_EXPRESSIONS:
+                        problems.append(
+                            f"sprite.poses.{name}.expressions.{key} is not one of {', '.join(SPRITE_EXPRESSIONS)}"
+                        )
+                    else:
+                        add(f"sprite.poses.{name}.expressions.{key}", path, SPRITE_EXTS)
+    return problems, files
 
 
 def _format_problems(rel: str, data: bytes) -> list[str]:
@@ -84,7 +99,7 @@ def _format_problems(rel: str, data: bytes) -> list[str]:
             found = glb.check(data, "vrma")
         else:
             return [f"{rel}: extension {ext or '(none)'!r} is not allowed"]
-    except ValueError as e:
+    except (ValueError, TypeError, AttributeError, KeyError, IndexError) as e:
         return [f"{rel}: unreadable: {e}"]
     return [f"{rel}: {p}" for p in found]
 
@@ -96,17 +111,20 @@ def check(dir: Path, profile: Path) -> list[str]:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
         return [f"{CONFIG}: {e}"]
 
-    problems, sprites, models = _structure(config)
+    problems, files = _structure(config)
     referenced = set()
     sizes = {}
-    for rel in sprites + models:
+    for rel, roles in files.items():
         why = path_problem(rel)
         if why:
             problems.append(why)
             continue
-        if rel in referenced:
-            continue
         referenced.add(rel)
+        ext = Path(rel).suffix.lower()
+        wrong = [exts for exts in roles if ext not in exts]
+        if wrong:
+            problems += [f"{rel}: a role here takes {' or '.join(exts)} files" for exts in wrong]
+            continue
         path = dir / rel
         if not path.is_file():
             problems.append(f"{rel} is named in {CONFIG} but missing")
@@ -114,8 +132,11 @@ def check(dir: Path, profile: Path) -> list[str]:
         data = path.read_bytes()
         found = _format_problems(rel, data)
         problems += found
-        if not found and rel in sprites:
-            sizes[rel] = SPRITE_FORMATS[path.suffix.lower()].size(data)
+        if not found and ext in SPRITE_FORMATS:
+            try:
+                sizes[rel] = SPRITE_FORMATS[ext].size(data)
+            except ValueError as e:
+                problems.append(f"{rel}: unreadable: {e}")
 
     if len(set(sizes.values())) > 1:
         listing = ", ".join(f"{rel} {w}x{h}" for rel, (w, h) in sorted(sizes.items()))

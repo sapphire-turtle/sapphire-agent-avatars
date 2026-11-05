@@ -25,8 +25,24 @@ EXPECTED_META = {
 }
 # Meta keys allowed besides EXPECTED_META, with any value.
 FREE_META = {"name", "version", "thumbnailImage"}
+# meta.name is the avatar's display name: free text, exempt from NAME_RE.
+FREE_TEXT_PATHS = {"$.extensions.VRMC_vrm.meta.name"}
 
-NAMED = ("images", "textures", "materials", "meshes", "nodes", "skins", "animations", "samplers")
+ASSET_KEYS = {"version", "minVersion", "generator"}
+# Extensions a VRM 1.0 model or VRMA animation may use. Anything else fails,
+# so a new metadata extension cannot slip through.
+EXTENSIONS = {
+    "VRMC_vrm",
+    "VRMC_springBone",
+    "VRMC_springBone_extended_collider",
+    "VRMC_node_constraint",
+    "VRMC_materials_mtoon",
+    "VRMC_vrm_animation",
+    "KHR_materials_unlit",
+    "KHR_materials_emissive_strength",
+    "KHR_texture_transform",
+    "EXT_texture_webp",
+}
 NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 IMAGE_CHECKS = {"image/png": png.check, "image/webp": webp.check}
 
@@ -41,7 +57,7 @@ def read(data: bytes) -> tuple[dict, bytes]:
     version, length = struct.unpack("<II", data[4:12])
     if version != 2 or length != len(data):
         raise ValueError("bad glTF binary header")
-    gltf, bin_ = None, b""
+    chunks = []
     pos = 12
     while pos < len(data):
         if pos + 8 > len(data):
@@ -50,15 +66,18 @@ def read(data: bytes) -> tuple[dict, bytes]:
         end = pos + 8 + size
         if end > len(data):
             raise ValueError("truncated glTF chunk")
-        payload = data[pos + 8 : end]
-        if kind == JSON_CHUNK and gltf is None:
-            gltf = json.loads(payload.decode("utf-8"))
-        elif kind == BIN_CHUNK:
-            bin_ = payload
+        chunks.append((kind, data[pos + 8 : end]))
         pos = end
-    if gltf is None:
-        raise ValueError("glTF binary has no JSON chunk")
-    return gltf, bin_
+    kinds = [k for k, _ in chunks]
+    if kinds not in ([JSON_CHUNK], [JSON_CHUNK, BIN_CHUNK]):
+        raise ValueError("glTF binary must hold one JSON chunk, then at most one BIN chunk, and nothing else")
+    try:
+        gltf = json.loads(chunks[0][1].decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise ValueError(f"glTF JSON chunk is not valid JSON: {e}") from None
+    if not isinstance(gltf, dict):
+        raise ValueError("glTF JSON must be an object")
+    return gltf, chunks[1][1] if len(chunks) == 2 else b""
 
 
 def write(gltf: dict, bin_: bytes) -> bytes:
@@ -71,58 +90,93 @@ def write(gltf: dict, bin_: bytes) -> bytes:
     return b"glTF" + struct.pack("<II", 2, 12 + len(out)) + out
 
 
-def _extras(node, path, out):
+def _walk(node, path, out):
+    """Problems anywhere in the JSON: extras, unknown extensions, unsafe names."""
     if isinstance(node, dict):
         for key, value in node.items():
+            here = f"{path}.{key}"
             if key == "extras":
-                out.append(f"{path}.extras is not allowed")
-            _extras(value, f"{path}.{key}", out)
+                out.append(f"{here} is not allowed")
+                continue
+            if key == "extensions":
+                if not isinstance(value, dict):
+                    out.append(f"{here} must be an object")
+                    continue
+                for ext in value:
+                    if ext not in EXTENSIONS:
+                        out.append(f"{here}.{ext} is not an allowed extension")
+            if key in ("extensionsUsed", "extensionsRequired") and path == "$":
+                for ext in value if isinstance(value, list) else [value]:
+                    if ext not in EXTENSIONS:
+                        out.append(f"{here} lists {ext!r}, not an allowed extension")
+                continue
+            if key == "name" and here not in FREE_TEXT_PATHS:
+                if not isinstance(value, str) or not NAME_RE.match(value):
+                    out.append(f"{here} {value!r} must be ASCII letters, digits, '_' or '-', up to 64")
+                continue
+            _walk(value, here, out)
     elif isinstance(node, list):
         for i, value in enumerate(node):
-            _extras(value, f"{path}[{i}]", out)
+            _walk(value, f"{path}[{i}]", out)
 
 
-def _image_bytes(gltf: dict, bin_: bytes, view_index: int) -> bytes:
-    view = gltf["bufferViews"][view_index]
-    start = view.get("byteOffset", 0)
-    return bin_[start : start + view["byteLength"]]
-
-
-def check(data: bytes, kind: str) -> list[str]:
-    """Problems with a "vrm" or "vrma" file; empty when clean."""
-    gltf, bin_ = read(data)
-    problems = []
-    asset = gltf.get("asset", {})
-    if asset.get("generator") != GENERATOR:
-        problems.append(f"asset.generator is {asset.get('generator')!r}, expected {GENERATOR!r}")
-    if "copyright" in asset:
-        problems.append("asset.copyright is not allowed")
-    _extras(gltf, "$", problems)
-
+def _check_images(gltf: dict, bin_: bytes, problems: list) -> None:
+    buffers = gltf.get("buffers", [])
+    for i, buffer in enumerate(buffers):
+        if not isinstance(buffer, dict) or "uri" in buffer:
+            problems.append(f"buffers[{i}] uses a uri; only the embedded BIN buffer is allowed")
     for i, image in enumerate(gltf.get("images", [])):
+        if not isinstance(image, dict):
+            problems.append(f"images[{i}] must be an object")
+            continue
         if "uri" in image:
             problems.append(f"images[{i}] uses a uri; images must be embedded")
             continue
         mime = image.get("mimeType")
-        if mime not in IMAGE_CHECKS or "bufferView" not in image:
+        if mime not in IMAGE_CHECKS or not isinstance(image.get("bufferView"), int):
             problems.append(f"images[{i}] must be an embedded image/png or image/webp")
             continue
         try:
-            found = IMAGE_CHECKS[mime](_image_bytes(gltf, bin_, image["bufferView"]))
-        except (ValueError, IndexError, KeyError) as e:
+            view = gltf["bufferViews"][image["bufferView"]]
+            if view.get("buffer") != 0:
+                problems.append(f"images[{i}] must live in the BIN buffer")
+                continue
+            start = view.get("byteOffset", 0)
+            found = IMAGE_CHECKS[mime](bin_[start : start + view["byteLength"]])
+        except (ValueError, IndexError, KeyError, TypeError, AttributeError) as e:
             found = [f"unreadable: {e}"]
         problems += [f"images[{i}]: {p}" for p in found]
 
-    for section in NAMED:
-        for i, item in enumerate(gltf.get(section, [])):
-            name = item.get("name")
-            if name is not None and not NAME_RE.match(name):
-                problems.append(f"{section}[{i}].name {name!r} must be ASCII letters, digits, '_' or '-', up to 64")
+
+def check(data: bytes, kind: str) -> list[str]:
+    """Problems with a "vrm" or "vrma" file; empty when clean."""
+    if kind not in ("vrm", "vrma"):
+        raise ValueError(f"unknown kind {kind!r}")
+    try:
+        gltf, bin_ = read(data)
+    except ValueError as e:
+        return [f"unreadable: {e}"]
+    problems = []
+    asset = gltf.get("asset")
+    if not isinstance(asset, dict):
+        return ["asset must be an object"]
+    if asset.get("generator") != GENERATOR:
+        problems.append(f"asset.generator is {asset.get('generator')!r}, expected {GENERATOR!r}")
+    for key in sorted(set(asset) - ASSET_KEYS):
+        problems.append(f"asset.{key} is not allowed")
+    _walk(gltf, "$", problems)
+    try:
+        _check_images(gltf, bin_, problems)
+    except (TypeError, AttributeError) as e:
+        problems.append(f"malformed buffers or images: {e}")
 
     extensions = gltf.get("extensions", {})
+    if not isinstance(extensions, dict):
+        return problems
     if kind == "vrm":
-        meta = extensions.get("VRMC_vrm", {}).get("meta")
-        if meta is None:
+        vrm = extensions.get("VRMC_vrm")
+        meta = vrm.get("meta") if isinstance(vrm, dict) else None
+        if not isinstance(meta, dict):
             problems.append("extensions.VRMC_vrm.meta is missing (VRM 1.0 required)")
         else:
             for key, value in EXPECTED_META.items():
@@ -130,11 +184,8 @@ def check(data: bytes, kind: str) -> list[str]:
                     problems.append(f"meta.{key} is {meta.get(key)!r}, expected {value!r}")
             for key in sorted(set(meta) - set(EXPECTED_META) - FREE_META):
                 problems.append(f"meta.{key} is not allowed")
-    elif kind == "vrma":
-        if "VRMC_vrm_animation" not in extensions:
-            problems.append("extensions.VRMC_vrm_animation is missing")
-    else:
-        raise ValueError(f"unknown kind {kind!r}")
+    elif "VRMC_vrm_animation" not in extensions:
+        problems.append("extensions.VRMC_vrm_animation is missing")
     return problems
 
 
