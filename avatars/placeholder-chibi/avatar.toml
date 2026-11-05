@@ -1,0 +1,7 @@
+# A stand-in for testing the release and install path; not the real character.
+[sprite]
+default_pose = "idle"
+
+[sprite.poses.idle]
+base = "sprite/idle.webp"
+expressions = { happy = "sprite/idle-happy.webp" }
