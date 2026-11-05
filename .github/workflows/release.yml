@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags: ["*-v*"]
+
+permissions:
+  contents: write
+
+# Two tags pushed together must not interleave their catalog uploads.
+concurrency:
+  group: catalog
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Test
+        run: python -m unittest discover -s tests -t .
+
+      - name: Build the avatar tar
+        run: python scripts/pack "$TAG" dist
+
+      - name: Publish the avatar release
+        run: gh release create "$TAG" dist/* --title "$TAG" --notes ""
+
+      - name: Make sure the catalog release exists
+        run: gh release view catalog >/dev/null 2>&1 || gh release create catalog --title catalog --notes "Avatar catalog"
+
+      - name: Collect releases and checksums
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --slurp > releases.json
+          mkdir -p sums
+          for tag in $(jq -r '.[][] | .tag_name | select(test("-v[0-9]+$"))' releases.json); do
+            gh release download "$tag" -p '*.tar.sha256' -D sums --clobber
+          done
+
+      - name: Build the catalog
+        run: |
+          python scripts/catalog --releases releases.json --sums sums \
+            --repo-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" --out dist-catalog/catalog.json
+          cp thumbnails/*.webp dist-catalog/
+
+      - name: Publish the catalog
+        run: gh release upload catalog dist-catalog/* --clobber
