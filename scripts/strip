@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+"""Remove metadata from PNG/WebP files and set the generator of VRM/VRMA files, in place."""
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+
+from avatars import glb, png, webp  # noqa: E402
+
+STRIPPERS = {".png": png.strip, ".webp": webp.strip, ".vrm": glb.strip, ".vrma": glb.strip}
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("files", nargs="+", type=Path)
+args = parser.parse_args()
+
+failed = False
+for path in args.files:
+    strip = STRIPPERS.get(path.suffix.lower())
+    if strip is None:
+        print(f"{path}: not a PNG, WebP, VRM or VRMA file", file=sys.stderr)
+        failed = True
+        continue
+    try:
+        path.write_bytes(strip(path.read_bytes()))
+    except ValueError as e:
+        print(f"{path}: {e}", file=sys.stderr)
+        failed = True
+sys.exit(1 if failed else 0)

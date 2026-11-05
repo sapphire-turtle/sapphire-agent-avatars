@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""Check the repository (or one avatar) before it is published. Exits 1 on any problem."""
+
+import argparse
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "tools"))
+
+from avatars import repo  # noqa: E402
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("id", nargs="?", help="check only this avatar's contents")
+parser.add_argument("--root", type=Path, default=ROOT, help="repository root")
+args = parser.parse_args()
+
+problems = repo.check(args.root, only=args.id)
+for p in problems:
+    print(p)
+sys.exit(1 if problems else 0)

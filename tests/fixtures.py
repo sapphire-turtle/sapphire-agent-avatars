@@ -58,3 +58,69 @@ def glb(gltf: dict, bin_bytes: bytes = b"") -> bytes:
         b = bin_bytes + b"\x00" * (-len(bin_bytes) % 4)
         out += struct.pack("<I", len(b)) + b"BIN\x00" + b
     return b"glTF" + struct.pack("<II", 2, 12 + len(out)) + out
+
+
+AVATAR_TOML = """\
+[vrm]
+model = "vrm/model.vrm"
+idle = "vrm/idle.vrma"
+
+[sprite]
+default_pose = "idle"
+
+[sprite.poses.idle]
+base = "sprite/idle.webp"
+expressions = { happy = "sprite/idle-happy.webp" }
+"""
+
+
+def sample_vrm() -> bytes:
+    from avatars import glb as glb_mod
+
+    return glb(
+        {
+            "asset": {"version": "2.0", "generator": glb_mod.GENERATOR},
+            "extensionsUsed": ["VRMC_vrm"],
+            "extensions": {"VRMC_vrm": {"specVersion": "1.0", "meta": dict(glb_mod.EXPECTED_META, name="Sample")}},
+        }
+    )
+
+
+def sample_vrma() -> bytes:
+    from avatars import glb as glb_mod
+
+    return glb(
+        {
+            "asset": {"version": "2.0", "generator": glb_mod.GENERATOR},
+            "extensions": {"VRMC_vrm_animation": {"specVersion": "1.0"}},
+        }
+    )
+
+
+def avatar(dir: Path) -> None:
+    """A valid avatar: one sprite pose with one expression, a VRM and an idle VRMA."""
+    (dir / "sprite").mkdir(parents=True)
+    (dir / "vrm").mkdir()
+    (dir / "avatar.toml").write_text(AVATAR_TOML)
+    (dir / "sprite" / "idle.webp").write_bytes(webp_lossless(8, 12))
+    (dir / "sprite" / "idle-happy.webp").write_bytes(webp_lossless(8, 12))
+    (dir / "vrm" / "model.vrm").write_bytes(sample_vrm())
+    (dir / "vrm" / "idle.vrma").write_bytes(sample_vrma())
+
+
+def repo(root: Path, ids=("default-chibi",)) -> Path:
+    """A valid repository holding the given avatars."""
+    (root / "character").mkdir(parents=True)
+    (root / "character" / "profile.md").write_text("# Profile\n")
+    (root / "thumbnails").mkdir()
+    entries = []
+    for id in ids:
+        outfit, proportion = id.rsplit("-", 1)
+        avatar(root / "avatars" / id)
+        (root / "thumbnails" / f"{id}.webp").write_bytes(webp_lossless(4, 4))
+        entries.append(
+            f'[[avatar]]\nid = "{id}"\noutfit = "{outfit}"\nproportion = "{proportion}"\n'
+            f'title = {{ en = "{id}", ja = "{id}" }}\n'
+        )
+    (root / "catalog.toml").write_text("\n".join(entries))
+    return root
