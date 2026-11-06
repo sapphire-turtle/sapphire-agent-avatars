@@ -110,9 +110,7 @@ def avatar(dir: Path) -> None:
 
 def repo(root: Path, ids=("default-chibi",)) -> Path:
     """A valid repository holding the given avatars."""
-    (root / "character").mkdir(parents=True)
-    (root / "character" / "profile.md").write_text("# Profile\n")
-    (root / "thumbnails").mkdir()
+    (root / "thumbnails").mkdir(parents=True)
     entries = []
     for id in ids:
         outfit, proportion = id.rsplit("-", 1)

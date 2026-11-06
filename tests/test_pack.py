@@ -40,7 +40,7 @@ class PackTest(unittest.TestCase):
         names = [m.name for m in members]
         self.assertEqual(names, sorted(names))
         self.assertIn("avatar", names)
-        self.assertIn("avatar/profile.md", names)
+        self.assertNotIn("avatar/profile.md", names)
         self.assertIn("avatar/avatar.toml", names)
         self.assertIn("avatar/sprite/idle.webp", names)
         self.assertTrue(all(n == "avatar" or n.startswith("avatar/") for n in names))

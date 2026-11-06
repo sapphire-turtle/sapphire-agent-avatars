@@ -1,4 +1,4 @@
-"""The repository: catalog.toml, avatars/, thumbnails/ and character/profile.md agree."""
+"""The repository: catalog.toml, avatars/ and thumbnails/ agree."""
 
 import re
 import tomllib
@@ -7,10 +7,6 @@ from pathlib import Path
 from . import avatar, webp
 
 ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*-(regular|chibi)$")
-
-
-def profile_path(root: Path) -> Path:
-    return root / "character" / "profile.md"
 
 
 def load_catalog(root: Path) -> list[dict]:
@@ -73,5 +69,5 @@ def check(root: Path, only: str | None = None) -> list[str]:
 
     for id in ids:
         if (only is None or id == only) and id in dirs:
-            problems += [f"{id}: {p}" for p in avatar.check(root / "avatars" / id, profile_path(root))]
+            problems += [f"{id}: {p}" for p in avatar.check(root / "avatars" / id)]
     return problems
